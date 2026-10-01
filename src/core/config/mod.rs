@@ -4078,6 +4078,26 @@ pub struct TlsConfig {
 	/// weakens transport security and is disabled by default.
 	#[serde(default)]
 	pub dual_protocol: bool,
+
+	/// Additional certificate authorities trusted for outbound HTTPS, as paths
+	/// to PEM files. Each file may hold several certificates.
+	///
+	/// These roots are added to the platform trust store rather than replacing
+	/// it, so federation with servers under a private authority keeps working
+	/// alongside public HTTPS destinations such as push gateways. Setting
+	/// `SSL_CERT_FILE` instead replaces the platform store entirely.
+	///
+	/// Every file is read and parsed at startup; an unreadable or invalid file
+	/// prevents the server from starting. Applies to the HTTP clients
+	/// (federation, well-known discovery, URL previews, pushers, identity
+	/// providers). SMTP, LDAP and S3 connections are not affected.
+	///
+	/// example: ["/etc/tuwunel/fleet-ca.pem"]
+	///
+	/// default: []
+	#[expect(clippy::doc_link_with_quotes)]
+	#[serde(default)]
+	pub trusted_roots: Vec<String>,
 }
 
 /// Configures Matrix discovery documents and related response data.

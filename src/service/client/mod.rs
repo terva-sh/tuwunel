@@ -7,7 +7,9 @@ use std::{
 
 use bytes::{Bytes, BytesMut};
 use ipaddress::{IPAddress, ipv4::from_u32 as ipv4_from_u32};
-use reqwest::{Client, ClientBuilder, Url, dns::Resolve, header::HeaderValue, redirect::Policy};
+use reqwest::{
+	Certificate, Client, ClientBuilder, Url, dns::Resolve, header::HeaderValue, redirect::Policy,
+};
 use tuwunel_core::{
 	Config, Err, Result, config::proxy::ProxySnapshot, debug, either::Either, err,
 	error::error_chain, implement, trace,
@@ -43,6 +45,9 @@ pub struct Service {
 	/// aligned even if configuration or environment values later change.
 	pub proxy: Arc<ProxySnapshot>,
 	pub cidr_range_denylist: Arc<[IPAddress]>,
+
+	/// Certificate authorities from `tls.trusted_roots`, loaded once at build.
+	pub roots: Arc<[Certificate]>,
 }
 
 impl Deref for Service {
@@ -55,8 +60,9 @@ impl crate::Service for Service {
 	fn build(args: &crate::Args<'_>) -> Result<Arc<Self>> {
 		let config = &args.server.config;
 		let proxy = Arc::new(ProxySnapshot::new(&config.proxy)?);
+		let roots: Arc<[Certificate]> = trusted_roots(&config.tls.trusted_roots)?.into();
 
-		probe_tls(config, &proxy)?;
+		probe_tls(config, &proxy, &roots)?;
 
 		Ok(Arc::new(Self {
 			clients: LazyLock::new(Box::new({
@@ -66,6 +72,7 @@ impl crate::Service for Service {
 			})),
 
 			proxy,
+			roots,
 			cidr_range_denylist: config
 				.ip_range_denylist
 				.iter()
@@ -85,8 +92,8 @@ impl crate::Service for Service {
 /// The clients are built lazily on first use, so a platform trust store that
 /// yields no roots surfaces as a panic inside whichever worker reaches for a
 /// client first. Probing once at startup turns that into a legible boot error.
-fn probe_tls(config: &Config, proxy: &ProxySnapshot) -> Result {
-	base(config, proxy, None)?
+fn probe_tls(config: &Config, proxy: &ProxySnapshot, roots: &[Certificate]) -> Result {
+	base(config, proxy, roots, None)?
 		.build()
 		.map(drop)
 		.map_err(|e| {
@@ -102,12 +109,18 @@ fn probe_tls(config: &Config, proxy: &ProxySnapshot) -> Result {
 fn make_clients(services: &Services) -> Result<Clients> {
 	macro_rules! with {
 		($builder:ident => $make:expr) => {{
-			let $builder = base(&services.config, &services.client.proxy, None)?;
+			let $builder =
+				base(&services.config, &services.client.proxy, &services.client.roots, None)?;
 
 			$make.build()?
 		}};
 		($name:literal, $builder:ident => $make:expr) => {{
-			let $builder = base(&services.config, &services.client.proxy, Some($name))?;
+			let $builder = base(
+				&services.config,
+				&services.client.proxy,
+				&services.client.roots,
+				Some($name),
+			)?;
 
 			$make.build()?
 		}};
@@ -241,7 +254,12 @@ fn valid_cidr_range_url(denylist: &[IPAddress], url: &Url) -> bool {
 	denylist.iter().all(|cidr| !cidr.includes(&ip))
 }
 
-fn base(config: &Config, proxy: &ProxySnapshot, name: Option<&str>) -> Result<ClientBuilder> {
+fn base(
+	config: &Config,
+	proxy: &ProxySnapshot,
+	roots: &[Certificate],
+	name: Option<&str>,
+) -> Result<ClientBuilder> {
 	let user_agent = tuwunel_core::version::user_agent();
 	let user_agent: HeaderValue = name
 		.map(|name| format!("{user_agent} {name}").try_into())
@@ -271,7 +289,38 @@ fn base(config: &Config, proxy: &ProxySnapshot, name: Option<&str>) -> Result<Cl
 		.filter(|(enabled, _)| !enabled)
 		.fold(builder, |builder, (_, disable)| disable(builder));
 
+	let builder = roots
+		.iter()
+		.cloned()
+		.fold(builder, ClientBuilder::add_root_certificate);
+
 	Ok(proxy.configure(builder))
+}
+
+/// Loads the certificate authorities named by `tls.trusted_roots`.
+///
+/// reqwest hands added roots to the platform verifier as extra roots, so the
+/// system store stays in effect. Read once when the service is built, so an
+/// unreadable or unparsable file is a configuration error naming the path at
+/// startup, and a file that changes afterwards has no effect until restart.
+pub(crate) fn trusted_roots(paths: &[String]) -> Result<Vec<Certificate>> {
+	let mut roots = Vec::new();
+	for path in paths {
+		let pem = std::fs::read(path)
+			.map_err(|e| err!(Config("tls.trusted_roots", "Failed to read {path:?}: {e}")))?;
+
+		let certs = Certificate::from_pem_bundle(&pem)
+			.map_err(|e| err!(Config("tls.trusted_roots", "Failed to parse {path:?}: {e}")))?;
+
+		if certs.is_empty() {
+			return Err!(Config("tls.trusted_roots", "No certificates found in {path:?}"));
+		}
+
+		debug!(?path, count = certs.len(), "Trusting additional root certificates");
+		roots.extend(certs);
+	}
+
+	Ok(roots)
 }
 
 /// Prevents a remote peer from forcing unbounded response-body allocation.

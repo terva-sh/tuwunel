@@ -59,7 +59,8 @@ fn check_with_captured_logs(config: &Config) -> (Result, String) {
 	static INIT: Once = Once::new();
 
 	// Installed once, process-wide for the whole test binary, since a per-test
-	// set_default races tracing's interest cache; future capture tests reuse this.
+	// set_default races tracing's interest cache; future capture tests reuse
+	// this.
 	INIT.call_once(|| {
 		let subscriber = fmt()
 			.with_ansi(false)
@@ -1240,4 +1241,24 @@ fn int_literal(token: &str) -> Option<u64> {
 	INT_SUFFIX
 		.contains(&suffix)
 		.and_then(|| digits.parse().ok())
+}
+
+#[test]
+fn tls_trusted_roots_defaults_to_empty() {
+	let config =
+		config_from_toml("[global]\nserver_name = \"example.com\"\n").expect("config parses");
+	assert!(config.tls.trusted_roots.is_empty());
+}
+
+#[test]
+fn tls_trusted_roots_parses_a_list_of_paths() {
+	let config = config_from_toml(
+		"[global]\nserver_name = \"example.com\"\n[global.tls]\ntrusted_roots = \
+		 [\"/etc/tuwunel/fleet-ca.pem\", \"/etc/tuwunel/other.pem\"]\n",
+	)
+	.expect("config parses");
+	assert_eq!(config.tls.trusted_roots, [
+		"/etc/tuwunel/fleet-ca.pem",
+		"/etc/tuwunel/other.pem"
+	]);
 }

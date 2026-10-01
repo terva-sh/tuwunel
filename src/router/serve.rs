@@ -96,6 +96,7 @@ pub(super) async fn serve(services: Arc<Services>, handle: ServerHandle) -> Resu
 				.chain(passed_tcp_listeners);
 
 			let tls_futures = tls::serve(
+				server,
 				&app,
 				&handle.handle_ip,
 				cert,
@@ -248,9 +249,9 @@ fn bind_addrs(
 ) -> Result<Vec<TcpListener>> {
 	let mut listeners = Vec::with_capacity(addrs.len());
 
-	// A dual-stack IPv6 socket answers for the IPv4 wildcard too, and the kernel
-	// refuses it once that wildcard is bound, so IPv6 goes first whatever order
-	// the configuration lists.
+	// A dual-stack IPv6 socket answers for the IPv4 wildcard too, and the
+	// kernel refuses it once that wildcard is bound, so IPv6 goes first
+	// whatever order the configuration lists.
 	let mut addrs = addrs.to_vec();
 	addrs.sort_by_key(SocketAddr::is_ipv4);
 
