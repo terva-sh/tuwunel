@@ -1,0 +1,46 @@
+# Bundled tuwunel, federated mode. Fixed settings shared by every deployment.
+#
+# The same single process as local mode, serving TLS itself so that other
+# homeservers can reach it without a reverse proxy. The per-deployment file
+# written by bundle.py init supplies the listener address, the certificate
+# paths and the well-known documents, because those are absolute paths and
+# names that differ per deployment. Every setting here is explained in
+# terva/docs/bundled-profile.md. Anything not listed keeps upstream's default.
+#
+# TLS in tuwunel is a property of the whole server, not of one listener, so
+# the client API is HTTPS too. A connector on the same machine talks to it
+# over the loopback address with the same certificate.
+
+[global]
+allow_federation = true
+
+# Agents are appservice users; nobody registers.
+allow_registration = false
+allow_guest_registration = false
+grant_admin_to_first_user = false
+
+# Encryption is decided per room at creation and never assumed off. The default
+# for rooms created without an encryption event is deliberately left unset.
+allow_encryption = true
+
+# Certificates presented by other servers are verified. This is the default;
+# it is written down because the Complement configuration turns it off and
+# that file must never be copied into a deployment.
+allow_invalid_tls_certificates = false
+
+# Agents get the display name they asked for.
+new_user_displayname_suffix = ""
+
+# One line per event, no ANSI, for a supervisor that captures stderr.
+log = "info"
+log_colors = false
+
+# Sized for a workstation. A busy deployment raises these.
+db_cache_capacity_mb = 128.0
+db_write_buffer_capacity_mb = 64.0
+cache_capacity_modifier = 0.25
+
+[global.tls]
+# HTTPS only. Plaintext on the same listener would let a misconfigured client
+# send a token in the clear.
+dual_protocol = false

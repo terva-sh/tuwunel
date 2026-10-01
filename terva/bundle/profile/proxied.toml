@@ -1,0 +1,51 @@
+# Bundled tuwunel, proxied mode. Fixed settings shared by every deployment.
+#
+# The server listens on plaintext loopback, as in local mode, but federates. A
+# reverse proxy on the same host terminates TLS for the public endpoint and
+# forwards to it, and the server answers its own well-known documents for the
+# server-name domain. The per-deployment file written by bundle.py init sets
+# the port, those documents, and any internal peer networks let through the
+# outbound denylist. Every setting here is explained in
+# terva/docs/bundled-profile.md. Anything not listed keeps upstream's default.
+
+[global]
+# Loopback only; the proxy is the one non-loopback path. A non-loopback
+# address is refused by bundle.py init in this mode.
+address = "127.0.0.1"
+
+allow_federation = true
+
+# Agents are appservice users; nobody registers.
+allow_registration = false
+allow_guest_registration = false
+grant_admin_to_first_user = false
+
+# Encryption is decided per room at creation and never assumed off. The default
+# for rooms created without an encryption event is deliberately left unset.
+allow_encryption = true
+
+# Peers' signing keys are fetched from the peers themselves. A mesh of internal
+# servers has no use for an outside notary, and asking matrix.org would leak
+# which servers this one talks to.
+trusted_servers = []
+
+# Certificates presented by other servers are verified. This is the default;
+# it is written down because the Complement configuration turns it off and
+# that file must never be copied into a deployment.
+allow_invalid_tls_certificates = false
+
+# Agents get the display name they asked for.
+new_user_displayname_suffix = ""
+
+# One line per event, no ANSI, for a supervisor that captures stderr.
+log = "info"
+log_colors = false
+
+# Sized for a workstation. A busy deployment raises these.
+db_cache_capacity_mb = 128.0
+db_write_buffer_capacity_mb = 64.0
+cache_capacity_modifier = 0.25
+
+# ip_source is deliberately unset. tuwunel always treats a loopback peer as
+# trusted and reads the client address from the forwarding headers, so with the
+# proxy on loopback the setting would change nothing. See bundled-profile.md.

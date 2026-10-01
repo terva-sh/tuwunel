@@ -1,0 +1,84 @@
+diff --git a/cmd/rpc/main.go b/cmd/rpc/main.go
+index 7bced3f..2f0428a 100644
+--- a/cmd/rpc/main.go
++++ b/cmd/rpc/main.go
+@@ -14,7 +14,8 @@ func main() {
+ 	srv := crpc.NewServer()
+ 	rpc.Register(srv)
+ 	rpc.HandleHTTP()
+-	listener, err := net.Listen("tcp", ":0")
++	// terva: loopback only. The parent process dials 127.0.0.1.
++	listener, err := net.Listen("tcp", "127.0.0.1:0")
+ 	if err != nil {
+ 		log.Fatal("Listener error: ", err)
+ 	}
+diff --git a/internal/deploy/callback/callback_addon.go b/internal/deploy/callback/callback_addon.go
+index f7faf6d..d0e1b2d 100644
+--- a/internal/deploy/callback/callback_addon.go
++++ b/internal/deploy/callback/callback_addon.go
+@@ -6,6 +6,8 @@ import (
+ 	"fmt"
+ 	"net"
+ 	"net/http"
++	"net/netip"
++	"os"
+ 	"strings"
+ 	"sync"
+ 	"sync/atomic"
+@@ -117,7 +119,19 @@ func NewCallbackServer(t ct.TestLike, hostnameRunningComplement string) (*Callba
+ 	mux := http.NewServeMux()
+ 
+ 	// listen on a random high numbered port
+-	ln, err := net.Listen("tcp", ":0") //nolint
++	// terva: never every interface. Under rootless podman the rig maps the
++	// host gateway to the host's loopback (HOST_LOOPBACK=1), so 127.0.0.1 is
++	// reachable from the mitmproxy container. Under Docker the gateway is the
++	// bridge's own address, which terva/complement/crypto/run.sh passes in
++	// TERVA_CALLBACK_BIND.
++	bind := os.Getenv("TERVA_CALLBACK_BIND")
++	if bind == "" {
++		bind = "127.0.0.1"
++	}
++	if addr, perr := netip.ParseAddr(bind); perr != nil || addr.IsUnspecified() {
++		return nil, fmt.Errorf("terva: TERVA_CALLBACK_BIND must be one specific address, got %q", bind)
++	}
++	ln, err := net.Listen("tcp", net.JoinHostPort(bind, "0")) //nolint
+ 	if err != nil {
+ 		return nil, fmt.Errorf("failed to listen on a tcp port: %s", err)
+ 	}
+diff --git a/internal/deploy/deploy.go b/internal/deploy/deploy.go
+index 0d1191e..c8b5e46 100644
+--- a/internal/deploy/deploy.go
++++ b/internal/deploy/deploy.go
+@@ -5,6 +5,7 @@ import (
+ 	"fmt"
+ 	"io"
+ 	"log"
++	"net/netip"
+ 	"net/url"
+ 	"os"
+ 	"runtime"
+@@ -23,6 +24,7 @@ import (
+ 	"github.com/matrix-org/complement/must"
+ 	"github.com/moby/moby/api/types/container"
+ 	"github.com/moby/moby/api/types/mount"
++	"github.com/moby/moby/api/types/network"
+ 	mobyClient "github.com/moby/moby/client"
+ 	testcontainers "github.com/testcontainers/testcontainers-go"
+ 	"github.com/testcontainers/testcontainers-go/wait"
+@@ -180,6 +182,15 @@ func RunNewDeployment(t *testing.T, mitmAddonsDir, mitmDumpFile string) *Complem
+ 				// see https://github.com/moby/moby/pull/40007
+ 				hc.ExtraHosts = []string{"host.docker.internal:host-gateway"}
+ 			}
++			// terva: publish the proxy on loopback only. Left to testcontainers,
++			// all three ports bind on every host interface, and 8080 is a
++			// forward proxy (`--mode regular`) that anyone on the LAN could use.
++			hc.PortBindings = network.PortMap{}
++			for _, p := range []string{hs1ExposedPort, hs2ExposedPort, controllerExposedPort} {
++				hc.PortBindings[network.MustParsePort(p)] = []network.PortBinding{
++					{HostIP: netip.MustParseAddr("127.0.0.1")},
++				}
++			}
+ 			hc.Mounts = []mount.Mount{
+ 				{
+ 					Type:   mount.TypeBind,

@@ -1,0 +1,15 @@
+# Scratch results directory for subset Complement runs.
+#
+# Point complement.sh here so a partial run does not overwrite the committed
+# baseline in tests/complement/results.jsonl:
+#
+#   complement_results_dir=terva/complement/scratch \
+#   complement_baseline_gate=0 \
+#   docker/complement.sh '^TestSomething$'
+#
+# It has to live inside the repository. complement-runner.sh:167 runs `git diff`
+# on the results path unconditionally under `set -eo pipefail`, and a path
+# outside the repo fails with `fatal: outside repository`.
+#
+# A run leaves about 10 MB here, mostly logs.jsonl.
+scratch/

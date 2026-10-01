@@ -1,0 +1,13 @@
+ARG TESTER_IMAGE=complement-tester--debian--testing-slim--aarch64-v1-linux-gnu:latest
+FROM ${TESTER_IMAGE}
+WORKDIR /usr/src/complement
+COPY loopback/apply.go /terva/apply.go
+RUN go run /terva/apply.go
+COPY loopback/terva_loopback*.go internal/docker/
+COPY loopback/terva_callback*.go tests/complemau/
+RUN gofmt -w internal/docker/deployer.go internal/docker/terva_loopback*.go tests/complemau/terva_callback*.go && \
+    go test ./internal/docker -run '^TestTervaLoopbackPolicy$' -count=1 && \
+    go test -tags=conduwuit_blacklist,complemau,terva_callback_unit -run '^TestTervaCallbackReadiness$' -count=1 ./tests/complemau/... && \
+    go test -tags=conduwuit_blacklist,complemau -run '^$' ./tests/complemau/...
+LABEL sh.terva.complement.loopback="v1"
+ENTRYPOINT ["go", "test"]

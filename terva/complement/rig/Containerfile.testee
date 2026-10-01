@@ -1,0 +1,78 @@
+# Complement testee image for tuwunel, built without docker bake.
+#
+# This replicates the `complement-testee` target of docker/Dockerfile.complement:
+# same config, same certificate SANs, same entrypoint contract. It exists only
+# because `docker buildx bake` does not run on hosts whose container runtime is
+# podman.
+#
+# The default base is a slim Debian image, which suits a statically linked
+# binary: a release asset or the output of terva/bundle/build.sh. A dynamic
+# binary from terva/build.sh needs the libraries it was linked against, so
+# build with --build-arg BASE=localhost/terva/tuwunel-build:latest for that.
+# Either base is Debian, so the packages below install on both.
+
+ARG BASE=docker.io/library/debian:trixie-slim
+FROM ${BASE}
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl openssl \
+    && rm -rf /var/lib/apt/lists/*
+
+EXPOSE 8008 8448
+
+RUN mkdir -p /database /var/log/tuwunel/metrics /complement/appservice
+
+WORKDIR /complement
+
+# Self-signed certificate covering the hostnames Complement gives homeservers.
+COPY v3.ext /complement/v3.ext
+RUN set -eux; \
+    openssl genrsa -out private_key.pem 2048; \
+    openssl req -new -sha256 -key private_key.pem \
+        -subj "/C=US/ST=CA/O=MyOrg, Inc./CN=hs1" \
+        -addext "subjectAltName = DNS:*.docker.internal, DNS:hs1, DNS:hs2, DNS:hs3, DNS:hs4, IP:127.0.0.1" \
+        -out signing_request.csr; \
+    openssl x509 -req -extfile v3.ext -in signing_request.csr \
+        -key private_key.pem -out certificate.crt -days 1 -sha256; \
+    test -f certificate.crt && test -f private_key.pem
+
+COPY complement.toml /complement/complement.toml
+COPY provision_complement.sh /complement/provision_complement.sh
+COPY sched_wrap.sh perf_wrap.sh /usr/local/bin/
+COPY tuwunel /usr/bin/tuwunel
+RUN chmod a+x /complement/provision_complement.sh /usr/local/bin/sched_wrap.sh \
+              /usr/local/bin/perf_wrap.sh /usr/bin/tuwunel
+
+ENV TUWUNEL_CONFIG="/complement/complement.toml"
+ENV TUWUNEL_RUNTIME_METRICS_DIR="/var/log/tuwunel/metrics"
+ENV TUWUNEL_RUNTIME_USAGE_DIR="/var/log/tuwunel/metrics"
+
+# Complement decides a homeserver is ready from the container HEALTHCHECK plus a
+# 200 from /versions. Without this it waits out COMPLEMENT_SPAWN_HS_TIMEOUT_SECS
+# and every test fails at deploy with an empty `health:` field. Upstream does not
+# put this in Dockerfile.complement because bake injects it at the install layer
+# (docker/bake.hcl, the `install` target).
+#
+# The image must also be built with `--format docker`. Podman defaults to the OCI
+# format, which has no HEALTHCHECK field and drops this silently.
+#
+# Timings deviate from upstream's --interval=30s --start-period=60s on purpose.
+# Complement deploys a blueprint per test, so a 30s poll interval adds roughly
+# half a minute of dead waiting to each of ~217 tests. Polling faster changes
+# only how quickly readiness is noticed, not what any test asserts.
+#
+# The command deviates too, and that one is not just for speed. Upstream uses
+# `tuwunel --health-check`, which loads TUWUNEL_CONFIG and exits with
+# "missing field `server_name`": the complement config deliberately omits
+# server_name because Complement supplies it per homeserver as -Oserver_name on
+# the entrypoint, and a HEALTHCHECK process does not get the entrypoint's
+# arguments. Verified by hand with `podman exec`. Probing /versions instead
+# needs no config and is precisely what Complement itself calls readiness:
+# "HEALTHCHECK being healthy *and* the /versions endpoint returning 200 OK".
+HEALTHCHECK --interval=2s --timeout=5s --start-period=2s --retries=60 \
+    CMD curl -fsS http://127.0.0.1:8008/_matrix/client/versions || exit 1
+
+# Shell form on purpose: Complement sets SERVER_NAME per homeserver and it has
+# to expand at run time, not build time.
+ENTRYPOINT exec /complement/provision_complement.sh sched_wrap.sh perf_wrap.sh \
+    tuwunel -Oserver_name=\""$SERVER_NAME\""

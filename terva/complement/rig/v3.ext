@@ -1,0 +1,11 @@
+authorityKeyIdentifier=keyid,issuer
+basicConstraints=CA:FALSE
+keyUsage = digitalSignature, nonRepudiation, keyEncipherment, dataEncipherment
+subjectAltName = @alt_names
+[alt_names]
+DNS.0 = *.docker.internal
+DNS.1 = hs1
+DNS.2 = hs2
+DNS.3 = hs3
+DNS.4 = hs4
+IP.1 = 127.0.0.1

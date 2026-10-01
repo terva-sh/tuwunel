@@ -1,0 +1,17 @@
+# Toolchains for terva/complement/crypto on a host that has Docker and not the
+# tools: Rust, Go, clang, git and jq. It holds no sources and runs nothing on its
+# own. prepare.sh and run.sh run inside it against a directory bind-mounted at
+# the same path as on the host, because the mitmproxy container bind-mounts
+# the addons directory through the host's daemon.
+#
+# The Rust tag must track `channel` in rust-toolchain.toml, and the Go tag must
+# satisfy complement-crypto's go.mod.
+ARG REGISTRY=docker.io/library
+FROM ${REGISTRY}/golang:1.27-trixie AS go
+
+FROM ${REGISTRY}/rust:1.95-trixie
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends clang curl jq && \
+    rm -rf /var/lib/apt/lists/*
+COPY --from=go /usr/local/go /usr/local/go
+ENV PATH="/usr/local/go/bin:${PATH}"

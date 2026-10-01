@@ -1,0 +1,41 @@
+# Build environment for tuwunel on a host that cannot install build packages.
+#
+# The package list mirrors `kitchen_packages` in docker/bake.hcl plus the
+# feature-gated libraries that bake adds for the default feature set
+# (io_uring, jemalloc, zstd_compression, bzip2_compression, lz4_compression).
+# When upstream changes that list, change this one to match.
+#
+# The base image tag must track `channel` in rust-toolchain.toml.
+
+FROM docker.io/library/rust:1.95-trixie
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        clang \
+        cmake \
+        curl \
+        gawk \
+        git \
+        gzip \
+        jq \
+        libbz2-dev \
+        libc6-dev \
+        libclang-dev \
+        libjemalloc-dev \
+        liblz4-dev \
+        libnuma-dev \
+        libsqlite3-dev \
+        libssl-dev \
+        liburing-dev \
+        libzstd-dev \
+        make \
+        openssl \
+        pkg-config \
+        pkgconf \
+        xz-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Materialise the toolchain the repository pins, including its components and
+# cross targets, so that a `cargo` run inside the container does not stop to
+# download them. Build with the repository root as the context.
+COPY rust-toolchain.toml /tmp/toolchain/rust-toolchain.toml
+RUN cd /tmp/toolchain && rustup show && rm -rf /tmp/toolchain

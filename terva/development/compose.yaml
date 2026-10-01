@@ -1,0 +1,101 @@
+# dev.py supplies these non-secret variables. Do not invoke Compose directly.
+services:
+  homeserver:
+    image: ${TUWUNEL_DEV_IMAGE:?}
+    pull_policy: never
+    container_name: ${TUWUNEL_DEV_ID:?}
+    user: "${TUWUNEL_DEV_UID:?}:${TUWUNEL_DEV_GID:?}"
+    read_only: true
+    restart: "no"
+    stop_grace_period: 60s
+    cpus: 2
+    mem_limit: 2g
+    pids_limit: 512
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      TUWUNEL_CONFIG: /config/tuwunel.toml
+      TOKIO_WORKER_THREADS: "2"
+    labels:
+      sh.terva.development.root: ${TUWUNEL_DEV_ROOT:?}
+    volumes:
+      - type: bind
+        source: ${TUWUNEL_DEV_ROOT:?}/config
+        target: /config
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${TUWUNEL_DEV_ROOT:?}/tls
+        target: /tls
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${TUWUNEL_DEV_ROOT:?}/data
+        target: /data
+        bind:
+          create_host_path: false
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    networks:
+      test:
+        aliases: ["${TUWUNEL_DEV_HOST:?}"]
+    # Upstream's pure-TLS health check only probes TCP. dev.py verifies HTTPS.
+    healthcheck:
+      test: [CMD, tuwunel, --health-check]
+      interval: 5s
+      timeout: 10s
+      start_period: 30s
+      retries: 12
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+  relay:
+    image: ${TUWUNEL_DEV_RELAY_IMAGE:?}
+    pull_policy: never
+    container_name: ${TUWUNEL_DEV_ID:?}-relay
+    user: "${TUWUNEL_DEV_UID:?}:${TUWUNEL_DEV_GID:?}"
+    entrypoint: [haproxy]
+    command: [-W, -db, -f, /usr/local/etc/haproxy/haproxy.cfg]
+    read_only: true
+    restart: "no"
+    stop_grace_period: 60s
+    cpus: 0.25
+    mem_limit: 64m
+    pids_limit: 32
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    sysctls:
+      net.ipv4.ip_forward: "0"
+    labels:
+      sh.terva.development.root: ${TUWUNEL_DEV_ROOT:?}
+    depends_on:
+      homeserver:
+        condition: service_started
+    volumes:
+      - type: bind
+        source: ${TUWUNEL_DEV_ROOT:?}/config/haproxy.cfg
+        target: /usr/local/etc/haproxy/haproxy.cfg
+        read_only: true
+        bind:
+          create_host_path: false
+    ports:
+      - target: 8448
+        published: "${TUWUNEL_DEV_PORT:?}"
+        host_ip: 127.0.0.1
+        protocol: tcp
+    networks: [test, loopback]
+    logging:
+      driver: json-file
+      options:
+        max-size: 1m
+        max-file: "2"
+networks:
+  test:
+    name: ${TUWUNEL_DEV_ID:?}-net
+    internal: true
+  loopback:
+    name: ${TUWUNEL_DEV_ID:?}-loopback

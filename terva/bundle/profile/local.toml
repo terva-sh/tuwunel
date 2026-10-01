@@ -1,0 +1,43 @@
+# Bundled tuwunel, local mode. Fixed settings shared by every deployment.
+#
+# terva runs this as a child process for its own agents on one machine. The
+# client API is plaintext on loopback and federation is off, so no certificate
+# is needed. This file is copied into a state directory by bundle.py init and
+# loaded first; config/tuwunel.toml (per deployment) and config/appservice.toml
+# (secrets) load after it and override it. Every setting here is explained in
+# terva/docs/bundled-profile.md. Anything not listed keeps upstream's default.
+
+[global]
+# Loopback only. The per-deployment file sets the port. A non-loopback address
+# is refused by bundle.py init in this mode.
+address = "127.0.0.1"
+
+# Local mode is a single server. Turning this on later is the federated mode,
+# which also needs TLS and a resolvable server name.
+allow_federation = false
+
+# Agents are appservice users; nobody registers.
+allow_registration = false
+allow_guest_registration = false
+grant_admin_to_first_user = false
+
+# Encryption is decided per room at creation and never assumed off. The default
+# for rooms created without an encryption event is deliberately left unset,
+# so a plaintext request creates a plaintext room and an encrypted request
+# creates an encrypted one.
+allow_encryption = true
+
+# No outside key server in a server that does not federate.
+trusted_servers = []
+
+# Agents get the display name they asked for.
+new_user_displayname_suffix = ""
+
+# One line per event, no ANSI, for a supervisor that captures stderr.
+log = "info"
+log_colors = false
+
+# Sized for a workstation. A busy deployment raises these.
+db_cache_capacity_mb = 128.0
+db_write_buffer_capacity_mb = 64.0
+cache_capacity_modifier = 0.25
