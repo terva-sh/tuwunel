@@ -8,8 +8,8 @@ use std::{
 
 use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt, future::join};
 use ruma::{
-	CanonicalJsonObject, CanonicalJsonValue, OwnedEventId, OwnedServerName, OwnedUserId, RoomId,
-	RoomOrAliasId, RoomVersionId, UserId,
+	CanonicalJsonObject, CanonicalJsonValue, OwnedEventId, OwnedRoomId, OwnedServerName,
+	OwnedUserId, RoomId, RoomOrAliasId, RoomVersionId, UserId,
 	api::{error::ErrorKind, federation},
 	canonical_json::to_canonical_value,
 	events::{
@@ -115,7 +115,8 @@ pub async fn join<'a>(
 		.services
 		.state_accessor
 		.get_member(room_id, sender_user)
-		.await && membership.membership == MembershipState::Ban
+		.await
+		&& membership.membership == MembershipState::Ban
 		&& !self
 			.services
 			.state_cache
@@ -150,7 +151,88 @@ pub async fn join<'a>(
 	self.copy_predecessor_push_rules(sender_user, room_id)
 		.await;
 
+	self.send_device_list_to_new_servers(sender_user, room_id)
+		.await;
+
 	Ok(())
+}
+
+/// Sends a joining user's devices to the room's servers not yet tracking them.
+///
+/// The spec requires an `m.device_list_update` when a user "joins a room which
+/// contains servers which are not already receiving updates for that user's
+/// device list". A server already sharing another room with the user receives
+/// updates through it. With `device_key_update_encrypted_rooms_only`, only
+/// encrypted rooms carry updates, so only they count on either side. The join
+/// has succeeded by now, so a failure here is logged rather than returned.
+#[implement(Service)]
+async fn send_device_list_to_new_servers(&self, user_id: &UserId, room_id: &RoomId) {
+	let encrypted_only = self
+		.services
+		.config
+		.device_key_update_encrypted_rooms_only;
+
+	let carries_updates = async |room_id: &RoomId| {
+		!encrypted_only
+			|| self
+				.services
+				.state_accessor
+				.is_encrypted_room(room_id)
+				.await
+	};
+
+	if !carries_updates(room_id).await {
+		return;
+	}
+
+	let joined: Vec<OwnedRoomId> = self
+		.services
+		.state_cache
+		.rooms_joined(user_id)
+		.ready_filter(|joined| *joined != room_id)
+		.map(ToOwned::to_owned)
+		.collect()
+		.await;
+
+	let mut other_rooms = Vec::with_capacity(joined.len());
+	for joined in joined {
+		if carries_updates(&joined).await {
+			other_rooms.push(joined);
+		}
+	}
+
+	let remote: Vec<OwnedServerName> = self
+		.services
+		.state_cache
+		.remote_room_servers(room_id)
+		.map(ToOwned::to_owned)
+		.collect()
+		.await;
+
+	let mut servers = Vec::with_capacity(remote.len());
+	'servers: for server in remote {
+		for other in &other_rooms {
+			if self
+				.services
+				.state_cache
+				.server_in_room(&server, other)
+				.await
+			{
+				continue 'servers;
+			}
+		}
+
+		servers.push(server);
+	}
+
+	if let Err(e) = self
+		.services
+		.sending
+		.send_device_list_snapshot(user_id, &servers)
+		.await
+	{
+		debug_warn!(%user_id, %room_id, "device list for new servers not queued: {e}");
+	}
 }
 
 /// Acquires the room's federation and state mutexes in canonical order.

@@ -182,9 +182,21 @@ async fn handle(
 	pdus: impl Stream<Item = (usize, Pdu)> + Send,
 	edus: impl Stream<Item = (usize, Edu)> + Send,
 ) -> Result<ResolvedMap> {
+	// A key change the origin made before sending these PDUs must not reach
+	// local clients after them, or a recipient sees a message from a device it
+	// has not yet been told about. The other EDUs follow the PDUs, so receipts
+	// and typing arrive after the events they refer to.
+	let (keys, edus): (Vec<_>, Vec<_>) = edus
+		.collect::<Vec<_>>()
+		.await
+		.into_iter()
+		.partition(|(_, edu)| matches!(edu, Edu::DeviceListUpdate(_) | Edu::SigningKeyUpdate(_)));
+
+	handle_edus(services, client, origin, txn_id, keys.into_iter().stream()).await?;
+
 	let results = handle_pdus(services, client, origin, txn_id, started, pdus).await?;
 
-	handle_edus(services, client, origin, txn_id, edus).await?;
+	handle_edus(services, client, origin, txn_id, edus.into_iter().stream()).await?;
 
 	Ok(results)
 }
@@ -637,13 +649,28 @@ async fn handle_edu_device_list_update(
 	origin: &ServerName,
 	content: DeviceListUpdateContent,
 ) {
-	let DeviceListUpdateContent { user_id, .. } = content;
+	let DeviceListUpdateContent { user_id, device_id, deleted, keys, .. } = content;
 
 	if user_id.server_name() != origin {
 		debug_warn!(
 			%user_id, %origin,
 			"received device list update EDU for user not belonging to origin"
 		);
+		return;
+	}
+
+	// The spec says `keys` "may be absent if the device has no E2E keys
+	// defined", so an update without them that is not a deletion describes a
+	// keyless device. That changes nothing a client acts on: remote device keys
+	// are not cached here to go stale, and a keyless device cannot be encrypted
+	// to. Only a keyless device's rename goes unreported. A server sends such
+	// updates, for one, with a joining user's devices to servers new to them,
+	// and the join has already put the user in `device_lists.changed`;
+	// reporting it again would be a second change for one event. The
+	// placeholder device is the resync signal this lineage's senders use, and
+	// always counts.
+	if keys.is_none() && deleted != Some(true) && device_id.as_str() != "placeholder" {
+		debug!(%user_id, %device_id, "device list update without keys; nothing to report");
 		return;
 	}
 

@@ -5,12 +5,12 @@ use std::{
 
 use futures::{StreamExt, future::join};
 use ruma::{
-	DeviceId, OwnedUserId, ServerName, UserId,
+	DeviceId, OwnedDeviceId, OwnedServerName, OwnedUserId, ServerName, UserId,
 	api::federation::transactions::edu::{DeviceListUpdateContent, Edu, SigningKeyUpdateContent},
 	device_id,
 };
 use tuwunel_core::{
-	implement,
+	Result, implement,
 	itertools::Itertools,
 	smallstr::SmallString,
 	smallvec::SmallVec,
@@ -216,6 +216,61 @@ fn record_delta(record: &DeviceListRecord) -> Option<Delta<'_>> {
 		prev_id: None,
 		deleted,
 	})
+}
+
+/// Queue a user's current devices for servers not yet receiving their list.
+///
+/// A join can bring servers that hold no device list for the user. Each
+/// device goes to them as its own update at the current stream position,
+/// with no `prev_id` since they hold no earlier update to chain from, followed
+/// by the user's signing keys. Nothing enters the device-list stream: the
+/// devices did not change, and every other peer already has them.
+#[implement(Service)]
+#[tracing::instrument(level = "debug", skip(self, servers), fields(servers = servers.len()))]
+pub async fn send_device_list_snapshot(
+	&self,
+	user_id: &UserId,
+	servers: &[OwnedServerName],
+) -> Result {
+	if servers.is_empty() {
+		return Ok(());
+	}
+
+	let stream_id = self
+		.services
+		.users
+		.get_devicelist_version(user_id)
+		.await
+		.unwrap_or(0);
+
+	let device_ids: Vec<OwnedDeviceId> = self
+		.services
+		.users
+		.all_device_ids(user_id)
+		.map(ToOwned::to_owned)
+		.collect()
+		.await;
+
+	for device_id in &device_ids {
+		let delta = Delta {
+			device_id,
+			stream_id,
+			prev_id: None,
+			deleted: false,
+		};
+
+		let edu = self.device_delta_edu(user_id, delta).await;
+		self.send_edu_servers(servers.iter().map(AsRef::as_ref).stream(), edu)
+			.await?;
+	}
+
+	for server in servers {
+		if let Some(edu) = self.signing_key_edu(user_id, server).await {
+			self.send_edu_server(server, edu)?;
+		}
+	}
+
+	Ok(())
 }
 
 fn device_list_edu(user_id: &UserId, stream_id: u64) -> EduBuf {
