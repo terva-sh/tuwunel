@@ -8,6 +8,8 @@ The upstream reference is the Matrix [Application Service API specification](htt
 
 Tuwunel supports three registration methods. They coexist and are all loaded on startup.
 
+Every registration ID and every `as_token` must be unique across all three methods. A registration that repeats either one is rejected, and a duplicate found while loading at startup is an error.
+
 ### Admin room
 
 The most convenient method for live deployments. Send `!admin appservices register` to the admin room with the registration YAML in a code block below:
@@ -27,7 +29,15 @@ namespaces:
 \`\`\`
 ```
 
-The registration is persisted in the database and survives restarts. Registering with an existing ID replaces the old entry. No restart is required.
+The registration is persisted in the database and survives restarts. No restart is required.
+
+Registering an ID that is already loaded fails with `Duplicate id`; nothing is replaced. To change a database registration, including rotating its tokens, unregister it and then register the new YAML:
+
+```
+!admin appservices unregister my-bridge
+```
+
+Unregistering cancels the deliveries queued for the appservice, and nothing is queued for it until it is registered again. Events from that window are not delivered to the new registration.
 
 ### Server configuration
 
@@ -45,18 +55,18 @@ exclusive = true
 regex = '@my-bridge_.*:example\.com'
 ```
 
-Config-file registrations are reloaded on each restart. They cannot be removed with `!admin appservices unregister`.
+Config-file registrations are reloaded on each restart. They cannot be removed with `!admin appservices unregister`; edit the file and restart instead.
 
 ### Registration file directory
 
-Point `appservice_dir` at a directory containing YAML registration files. Every readable file is loaded at startup:
+Point `appservice_dir` at a directory containing YAML registration files. Each regular file whose name ends in `.yaml` or `.yml` is loaded at startup. Other files and subdirectories are ignored, and a file that fails to parse is an error:
 
 ```toml
 [global]
 appservice_dir = "/etc/tuwunel/appservices"
 ```
 
-Files use the same YAML format that bridges produce for Synapse. New or removed files are not picked up without a restart.
+Files use the same YAML format that bridges produce for Synapse. New or removed files are not picked up without a restart, and these registrations cannot be removed with `!admin appservices unregister` either.
 
 ## Namespaces
 
@@ -70,7 +80,7 @@ Each registration declares which users, room aliases, and room IDs the appservic
 
 Regex matching is unanchored -- add `^` and `$` if you need to match the full string.
 
-When `exclusive: true`, the homeserver rejects any attempt by a normal user to register a conflicting user ID or room alias. Multiple appservices can share a non-exclusive namespace; exclusive ranges must not overlap.
+When `exclusive: true`, the homeserver rejects any attempt by a normal user to register a conflicting user ID or room alias. Multiple appservices can share a non-exclusive namespace; exclusive ranges must not overlap. Tuwunel does not check this when it loads a registration, so keeping exclusive namespaces apart is up to the operator.
 
 ## Configuration reference
 
@@ -102,8 +112,8 @@ All commands run from the admin room (`!admin appservices <subcommand>`):
 
 | Command | Description |
 |---|---|
-| `register` | Register or replace an appservice. Paste the YAML in a code block below the command. |
-| `unregister <id>` | Remove a database-registered appservice and cancel pending deliveries. Config-file registrations cannot be unregistered this way. |
+| `register` | Register an appservice. Paste the YAML in a code block below the command. Fails if the ID or `as_token` is already loaded. |
+| `unregister <id>` | Remove a database-registered appservice and cancel pending deliveries. Registrations from the config file or `appservice_dir` cannot be unregistered this way. |
 | `show-config <id>` | Print the stored registration as YAML. |
 | `list` | List IDs of all loaded appservices. |
 
