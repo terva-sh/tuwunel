@@ -876,6 +876,17 @@ async fn try_user_id(
 		return None;
 	}
 
+	// Checked before the existing-user branch, so a trusted provider is never
+	// handed an appservice's user either.
+	if services
+		.appservice
+		.is_exclusive_user_id(&user_id)
+		.await
+	{
+		warn!(?username, "Username reserved by an appservice.");
+		return None;
+	}
+
 	if services.users.exists(&user_id).await {
 		if provider.trusted {
 			info!(
