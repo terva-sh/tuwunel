@@ -4,21 +4,27 @@ mod tests;
 mod v3;
 mod v5;
 
-use futures::{StreamExt, pin_mut};
+use std::collections::HashSet;
+
+use futures::{Stream, StreamExt, future::join, pin_mut};
 use ruma::{
-	OwnedUserId, RoomId, UserId,
+	OwnedRoomId, OwnedUserId, RoomId, UserId,
 	events::{
-		AnyStrippedStateEvent,
+		AnyStrippedStateEvent, StateEventType,
 		TimelineEventType::{RoomCreate, RoomMember},
+		room::member::{MembershipState, RoomMemberEventContent},
 	},
 	serde::Raw,
 };
 use tuwunel_core::{
 	Error, PduCount, Result, debug_warn, is_equal_to,
 	matrix::{Event, pdu::PduEvent},
-	utils::{ReadyExt, result::LogErr, stream::BroadbandExt},
+	utils::{
+		IterStream, ReadyExt, TryFutureExtExt, option::OptionExt, result::LogErr,
+		stream::BroadbandExt,
+	},
 };
-use tuwunel_service::{Services, users::InviteFilter};
+use tuwunel_service::{Services, rooms::short::ShortStateHash, users::InviteFilter};
 
 pub(crate) use self::{
 	v3::{calculate_heroes, sync_events_route},
@@ -159,6 +165,95 @@ async fn share_encrypted_room(
 				.is_encrypted_room(&other_room_id)
 				.await
 		})
+		.await
+}
+
+/// Members of the rooms `sender_user` left within `(since, next_batch]`, the
+/// candidates a leave adds to `device_lists.left`. Rooms still joined supply
+/// their candidates from membership changes, and a left room is not visited
+/// by that path. Callers keep only users [`share_encrypted_room`] no longer
+/// finds. An initial sync has no device list to shrink, so it yields none.
+fn left_rooms_members<'a>(
+	services: &'a Services,
+	sender_user: &'a UserId,
+	since: u64,
+	next_batch: u64,
+) -> impl Stream<Item = OwnedUserId> + Send + 'a {
+	services
+		.state_cache
+		.rooms_left(sender_user)
+		.ready_filter(move |_| since != 0)
+		.map(ToOwned::to_owned)
+		.broad_filter_map(move |room_id| {
+			left_room_members(services, sender_user, room_id, since, next_batch)
+		})
+		.map(IterStream::stream)
+		.flatten()
+}
+
+/// The room's members `sender_user` could have been tracking: those joined
+/// at the start of the window and those joined in the state before the
+/// user's leave. The first keeps someone who left earlier in the same
+/// window; the second keeps someone who joined since. A member who joined
+/// and left entirely inside the window was never reported, so is not named.
+async fn left_room_members(
+	services: &Services,
+	sender_user: &UserId,
+	room_id: OwnedRoomId,
+	since: u64,
+	next_batch: u64,
+) -> Option<Vec<OwnedUserId>> {
+	let left_count = services
+		.state_cache
+		.get_left_count(&room_id, sender_user)
+		.await
+		.ok()?;
+
+	if left_count <= since || left_count > next_batch {
+		return None;
+	}
+
+	// The shortstatehash stored at the leave PDU is the state before it.
+	let at_leave = services
+		.timeline
+		.get_shortstatehash(&room_id, PduCount::Normal(left_count))
+		.ok();
+
+	// State as of `since` is the state before the first PDU after it. The
+	// leave falls inside the window, so that PDU exists.
+	let at_since = services
+		.timeline
+		.next_shortstatehash(&room_id, PduCount::Normal(since))
+		.ok();
+
+	let (at_leave, at_since) = join(at_leave, at_since).await;
+	let at_leave = at_leave?;
+
+	let at_leave = joined_members(services, sender_user, at_leave);
+	let at_since = at_since.map_async(|at_since| joined_members(services, sender_user, at_since));
+
+	let (mut members, at_since) = join(at_leave, at_since).await;
+	members.extend(at_since.into_iter().flatten());
+
+	Some(members.into_iter().collect())
+}
+
+async fn joined_members(
+	services: &Services,
+	sender_user: &UserId,
+	shortstatehash: ShortStateHash,
+) -> HashSet<OwnedUserId> {
+	services
+		.state_accessor
+		.state_type_pdus(shortstatehash, &StateEventType::RoomMember)
+		.ready_filter_map(|pdu| {
+			let content: RoomMemberEventContent = pdu.get_content().ok()?;
+			let user_id: OwnedUserId = pdu.state_key()?.parse().ok()?;
+
+			(content.membership == MembershipState::Join && user_id != sender_user)
+				.then_some(user_id)
+		})
+		.collect()
 		.await
 }
 

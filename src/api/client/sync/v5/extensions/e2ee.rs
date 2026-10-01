@@ -25,7 +25,7 @@ use tuwunel_core::{
 };
 use tuwunel_service::sync::Connection;
 
-use super::{SyncInfo, share_encrypted_room};
+use super::{SyncInfo, left_rooms_members, share_encrypted_room};
 
 #[tracing::instrument(name = "e2ee", level = "trace", skip_all)]
 pub(super) async fn collect(
@@ -44,6 +44,11 @@ pub(super) async fn collect(
 		.collect::<HashSet<_>>()
 		.map(|changed| (changed, HashSet::new()));
 
+	let left_rooms_members =
+		left_rooms_members(services, sender_user, conn.globalsince, conn.next_batch)
+			.collect::<HashSet<_>>()
+			.map(|left| (HashSet::new(), left));
+
 	let (changed, left) = (HashSet::new(), HashSet::new());
 	let (changed, left) = services
 		.state_cache
@@ -51,6 +56,7 @@ pub(super) async fn collect(
 		.map(ToOwned::to_owned)
 		.broad_filter_map(async |room_id| collect_room(sync_info, conn, &room_id).await.ok())
 		.chain(once(keys_changed))
+		.chain(once(left_rooms_members))
 		.ready_fold((changed, left), |(mut changed, mut left), room| {
 			changed.extend(room.0);
 			left.extend(room.1);

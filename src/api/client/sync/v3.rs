@@ -72,8 +72,8 @@ use tuwunel_service::{
 };
 
 use super::{
-	invite_permitted, load_timeline, profiles::collect as collect_profiles, share_encrypted_room,
-	strip_prev_state, timeline_prev_batch,
+	invite_permitted, left_rooms_members, load_timeline, profiles::collect as collect_profiles,
+	share_encrypted_room, strip_prev_state, timeline_prev_batch,
 };
 use crate::{
 	ClientIp, Ruma,
@@ -450,6 +450,9 @@ async fn build_sync_events(
 		filter,
 	);
 
+	let left_rooms_members =
+		left_rooms_members(services, sender_user, since, next_batch).collect::<HashSet<_>>();
+
 	let invited_rooms =
 		collect_invited_rooms(services, sender_user, since, next_batch, filter, &invite_filter);
 
@@ -504,8 +507,8 @@ async fn build_sync_events(
 		presence_updates,
 		(_, to_device_events, device_one_time_keys_count, device_unused_fallback_key_types),
 		(
-			(joined_rooms, mut device_list_updates, left_encrypted_users),
-			left_rooms,
+			(joined_rooms, mut device_list_updates, mut left_encrypted_users),
+			(left_rooms, left_rooms_members),
 			invited_rooms,
 			knocked_rooms,
 		),
@@ -519,12 +522,13 @@ async fn build_sync_events(
 			device_one_time_keys_count,
 			device_unused_fallback_key_types,
 		),
-		join4(joined_rooms, left_rooms, invited_rooms, knocked_rooms),
+		join4(joined_rooms, join(left_rooms, left_rooms_members), invited_rooms, knocked_rooms),
 	)
 	.boxed()
 	.await;
 
 	device_list_updates.extend(keys_changed);
+	left_encrypted_users.extend(left_rooms_members);
 
 	let rooms = Rooms {
 		leave: left_rooms,
@@ -833,8 +837,9 @@ async fn handle_left_room(
 
 	pin_mut!(is_not_found, is_disabled, is_banned);
 	if is_not_found.or(is_disabled).or(is_banned).await {
-		// For rejected invites, deleted, missing, or broken room state this is the last
-		// resort to convey a the minimum of information to the client.
+		// For rejected invites, deleted, missing, or broken room state this is
+		// the last resort to convey a the minimum of information to the
+		// client.
 		let event = PduEvent {
 			event_id: EventId::new_v1(services.globals.server_name()),
 			origin_server_ts: utils::millis_since_unix_epoch().try_into()?,
@@ -2346,7 +2351,8 @@ async fn lazy_filter(
 		.ok()?;
 
 	// An MSC4222 delta also keeps changed members the witness will not re-add
-	// (lazy_state_ids covers witnessed ones), avoiding both a miss and a duplicate.
+	// (lazy_state_ids covers witnessed ones), avoiding both a miss and a
+	// duplicate.
 	let keep = event_type != StateEventType::RoomMember
 		|| state_key == sender_user.as_str()
 		|| (after && <&UserId>::try_from(state_key.as_str()).is_ok_and(|u| !witness.contains(u)));

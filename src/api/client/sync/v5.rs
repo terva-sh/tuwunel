@@ -41,7 +41,7 @@ use self::{
 	extensions::{apply_profiles, apply_ranges, handle as handle_extensions},
 	range::collect as collect_ranges,
 };
-use super::share_encrypted_room;
+use super::{left_rooms_members, share_encrypted_room};
 use crate::{ClientIp, Ruma};
 
 #[derive(Copy, Clone)]
