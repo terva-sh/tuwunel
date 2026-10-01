@@ -1,0 +1,99 @@
+terva-sh/tuwunel
+================
+
+This repository is terva-sh's release mirror of tuwunel, a Matrix homeserver:
+
+  https://github.com/matrix-construct/tuwunel
+
+tuwunel is Copyright the tuwunel contributors and is licensed under the
+Apache License, Version 2.0, in LICENSE. tuwunel is the successor to
+conduwuit (https://github.com/x86pup/conduwuit), which was a fork of Conduit
+(https://gitlab.com/famedly/conduit); their code and authorship are carried
+in this history. This repository is not affiliated with or endorsed by any of
+those projects.
+
+Our changes are licensed under the same Apache License, Version 2.0.
+
+
+Upstream base
+-------------
+
+This release is built on upstream tuwunel v1.9.2:
+
+  c991bca17fbcd02c41f76d759986c5372a9968c4
+
+Every commit up to that one is upstream's, unchanged. The commits after it
+are terva-sh's.
+
+
+Modifications (Apache License 2.0, section 4(b))
+------------------------------------------------
+
+Upstream files changed by terva-sh:
+
+  README.md
+  docs/appservices.md
+  src/api/client/session/sso.rs
+  src/api/client/sync/mod.rs
+  src/api/client/sync/v3.rs
+  src/api/client/sync/v5.rs
+  src/api/client/sync/v5/extensions.rs
+  src/api/client/sync/v5/extensions/e2ee.rs
+  src/api/server/send.rs
+  src/core/config/mod.rs
+  src/core/config/tests.rs
+  src/macros/git.rs
+  src/router/serve.rs
+  src/router/serve/tls.rs
+  src/service/client/mod.rs
+  src/service/client/tests.rs
+  src/service/membership/join.rs
+  src/service/sending/sender/select/device_changes.rs
+  tests/complement/results.jsonl
+  tuwunel-example.toml
+
+Added by terva-sh:
+
+  NOTICE
+  terva/Containerfile.build
+  terva/build.sh
+  terva/bundle/ (8 files)
+  terva/complement/ (29 files)
+  terva/contract/ (2 files)
+  terva/development/ (6 files)
+  terva/docs/ (12 files)
+  terva/lifecycle/ (2 files)
+
+Upstream files removed from this mirror, among them all of upstream's
+GitHub CI, which does not run here:
+
+  .github/ (29 files)
+
+
+Third-party source used but not included
+----------------------------------------
+
+Scripts under terva/ fetch these at test time. None is vendored here, and
+each keeps its own license:
+
+  Complement           https://github.com/matrix-construct/complement
+                       (fork of https://github.com/matrix-org/complement)
+                       Apache-2.0
+  complement-crypto    https://github.com/matrix-construct/complement-crypto
+                       (fork of https://github.com/matrix-org/complement-crypto)
+                       Apache-2.0
+  matrix-rust-sdk      https://github.com/matrix-construct/matrix-rust-sdk
+                       (fork of https://github.com/matrix-org/matrix-rust-sdk)
+                       Apache-2.0
+  uniffi-bindgen-go    https://github.com/NordSecurity/uniffi-bindgen-go
+                       MPL-2.0
+
+Container images the terva/ scripts pull, among them rust, golang, docker
+and mitmproxy, are each under their own license.
+
+
+Ticket references
+-----------------
+
+Documents under terva/ cite work as TKT-... identifiers. Those name entries
+in terva-sh's internal work ledger, which is not published.

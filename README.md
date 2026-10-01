@@ -1,3 +1,13 @@
+> [!NOTE]
+> **This is terva-sh/tuwunel, a release mirror of [tuwunel](https://github.com/matrix-construct/tuwunel).**
+> It carries upstream tuwunel's history unchanged, plus the changes terva-sh makes for
+> [terva](https://github.com/terva-sh/terva), published here as curated release commits.
+> [NOTICE](NOTICE) lists every file we modified, added or removed. Our tooling lives
+> under [terva/](terva/). This repository is not affiliated with the tuwunel project.
+> For tuwunel itself (documentation, support, and problems you can reproduce on an
+> upstream release), go to upstream. Everything below this note is upstream's README,
+> unchanged, so its links point at upstream.
+
 # Tuwunel<sup>💕</sup>
 
 ![GitHub License](https://img.shields.io/github/license/matrix-construct/tuwunel?style=flat%2Dsquare&color=%238A2BE2)
